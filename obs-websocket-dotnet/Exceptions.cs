@@ -10,6 +10,20 @@ namespace OBSWebsocketDotNet
     }
 
     /// <summary>
+    /// Thrown when a request receives no response from the server within <see cref="OBSWebsocket.WSTimeout"/>
+    /// </summary>
+    public class RequestTimeoutException : Exception
+    {
+        /// <summary>
+        /// Constructor
+        /// </summary>
+        /// <param name="message">Exception message</param>
+        public RequestTimeoutException(string message) : base(message)
+        {
+        }
+    }
+
+    /// <summary>
     /// Thrown when the server responds with an error
     /// </summary>
     public class ErrorResponseException : Exception

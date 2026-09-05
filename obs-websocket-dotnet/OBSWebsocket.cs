@@ -23,7 +23,7 @@ namespace OBSWebsocketDotNet
         private WebsocketClient wsConnection;
 
         private delegate void RequestCallback(OBSWebsocket sender, JObject body);
-        private readonly ConcurrentDictionary<string, TaskCompletionSource<JObject>> responseHandlers;
+        protected readonly ConcurrentDictionary<string, TaskCompletionSource<JObject>> responseHandlers;
 
         // Random should never be created inside a function
         private static readonly Random random = new Random();
@@ -237,25 +237,48 @@ namespace OBSWebsocketDotNet
             // Prepare the asynchronous response handler
             var tcs = new TaskCompletionSource<JObject>();
             JObject message = null;
+            string messageId = null;
             do
             {
                 // Generate a random message id
-                message = MessageFactory.BuildMessage(operationCode, requestType, additionalFields, out string messageId);
+                message = MessageFactory.BuildMessage(operationCode, requestType, additionalFields, out messageId);
                 if (!waitForReply || responseHandlers.TryAdd(messageId, tcs))
                 {
                     break;
                 }
                 // Message id already exists, retry with a new one.
             } while (true);
-            // Send the message 
+            // Send the message
             wsConnection.Send(message.ToString());
             if (!waitForReply)
             {
                 return null;
             }
 
-            // Wait for a response (received and notified by the websocket response handler)
-            tcs.Task.Wait(wsTimeout.Milliseconds);
+            return WaitForResponse(tcs, messageId, requestType);
+        }
+
+        /// <summary>
+        /// Waits for a pending request's response, up to <see cref="WSTimeout"/>, and interprets the result.
+        /// </summary>
+        /// <param name="tcs">Completion source registered for this request's message id</param>
+        /// <param name="messageId">The request's message id, used to remove an abandoned handler on timeout</param>
+        /// <param name="requestType">obs-websocket request type, used only for exception messages</param>
+        /// <returns>The server's JSON response data as a JObject</returns>
+        /// <exception cref="RequestTimeoutException">No response was received within <see cref="WSTimeout"/></exception>
+        /// <exception cref="ErrorResponseException">The request was canceled (e.g. by Disconnect), or the server reported an error</exception>
+        protected JObject WaitForResponse(TaskCompletionSource<JObject> tcs, string messageId, string requestType)
+        {
+            // Task.WaitAny (rather than tcs.Task.Wait) blocks for up to wsTimeout without
+            // throwing if the task ends up canceled or faulted, so IsCanceled below reflects
+            // the outcome of this wait rather than of the eventual Result access.
+            int completedIndex = Task.WaitAny(new Task[] { tcs.Task }, wsTimeout);
+
+            if (completedIndex == -1)
+            {
+                responseHandlers.TryRemove(messageId, out _);
+                throw new RequestTimeoutException($"Request '{requestType}' timed out after {(int)wsTimeout.TotalMilliseconds}ms");
+            }
 
             if (tcs.Task.IsCanceled)
                 throw new ErrorResponseException("Request canceled", 0);
