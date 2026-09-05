@@ -141,9 +141,36 @@ namespace OBSWebsocketDotNet
         public event EventHandler<SceneItemSelectedEventArgs> SceneItemSelected;
 
         /// <summary>
-        /// A scene item transform has changed
+        /// A scene item transform has changed.
+        /// This is a high-volume event: subscribing sends a ReIdentify to opt in, unsubscribing (once no handlers remain) opts back out.
         /// </summary>
-        public event EventHandler<SceneItemTransformEventArgs> SceneItemTransformChanged;
+        public event EventHandler<SceneItemTransformEventArgs> SceneItemTransformChanged
+        {
+            add
+            {
+                lock (sceneItemTransformLock)
+                {
+                    if (sceneItemTransformChanged == null)
+                    {
+                        RegisterEvent(EventSubscription.SceneItemTransformChanged);
+                    }
+                    sceneItemTransformChanged += value;
+                }
+            }
+            remove
+            {
+                lock (sceneItemTransformLock)
+                {
+                    sceneItemTransformChanged -= value;
+                    if (sceneItemTransformChanged == null)
+                    {
+                        UnRegisterEvent(EventSubscription.SceneItemTransformChanged);
+                    }
+                }
+            }
+        }
+        private readonly object sceneItemTransformLock = new object();
+        private event EventHandler<SceneItemTransformEventArgs> sceneItemTransformChanged;
 
         /// <summary>
         /// The audio sync offset of an input has changed
@@ -238,14 +265,68 @@ namespace OBSWebsocketDotNet
         /// <summary>
         /// An input's active state has changed.
         /// When an input is active, it means it's being shown by the program feed.
+        /// This is a high-volume event: subscribing sends a ReIdentify to opt in, unsubscribing (once no handlers remain) opts back out.
         /// </summary>
-        public event EventHandler<InputActiveStateChangedEventArgs> InputActiveStateChanged;
+        public event EventHandler<InputActiveStateChangedEventArgs> InputActiveStateChanged
+        {
+            add
+            {
+                lock (inputActiveStateLock)
+                {
+                    if (inputActiveStateChanged == null)
+                    {
+                        RegisterEvent(EventSubscription.InputActiveStateChanged);
+                    }
+                    inputActiveStateChanged += value;
+                }
+            }
+            remove
+            {
+                lock (inputActiveStateLock)
+                {
+                    inputActiveStateChanged -= value;
+                    if (inputActiveStateChanged == null)
+                    {
+                        UnRegisterEvent(EventSubscription.InputActiveStateChanged);
+                    }
+                }
+            }
+        }
+        private readonly object inputActiveStateLock = new object();
+        private event EventHandler<InputActiveStateChangedEventArgs> inputActiveStateChanged;
 
         /// <summary>
         /// An input's show state has changed.
         /// When an input is showing, it means it's being shown by the preview or a dialog.
+        /// This is a high-volume event: subscribing sends a ReIdentify to opt in, unsubscribing (once no handlers remain) opts back out.
         /// </summary>
-        public event EventHandler<InputShowStateChangedEventArgs> InputShowStateChanged;
+        public event EventHandler<InputShowStateChangedEventArgs> InputShowStateChanged
+        {
+            add
+            {
+                lock (inputShowStateLock)
+                {
+                    if (inputShowStateChanged == null)
+                    {
+                        RegisterEvent(EventSubscription.InputShowStateChanged);
+                    }
+                    inputShowStateChanged += value;
+                }
+            }
+            remove
+            {
+                lock (inputShowStateLock)
+                {
+                    inputShowStateChanged -= value;
+                    if (inputShowStateChanged == null)
+                    {
+                        UnRegisterEvent(EventSubscription.InputShowStateChanged);
+                    }
+                }
+            }
+        }
+        private readonly object inputShowStateLock = new object();
+        private event EventHandler<InputShowStateChangedEventArgs> inputShowStateChanged;
 
         /// <summary>
         /// The audio balance value of an input has changed.
@@ -268,8 +349,35 @@ namespace OBSWebsocketDotNet
 
         /// <summary>
         /// A high-volume event providing volume levels of all active inputs every 50 milliseconds.
+        /// Subscribing sends a ReIdentify to opt in, unsubscribing (once no handlers remain) opts back out.
         /// </summary>
-        public event EventHandler<InputVolumeMetersEventArgs> InputVolumeMeters;
+        public event EventHandler<InputVolumeMetersEventArgs> InputVolumeMeters
+        {
+            add
+            {
+                lock (volumeMetersLock)
+                {
+                    if (inputVolumeMeters == null)
+                    {
+                        RegisterEvent(EventSubscription.InputVolumeMeters);
+                    }
+                    inputVolumeMeters += value;
+                }
+            }
+            remove
+            {
+                lock (volumeMetersLock)
+                {
+                    inputVolumeMeters -= value;
+                    if (inputVolumeMeters == null)
+                    {
+                        UnRegisterEvent(EventSubscription.InputVolumeMeters);
+                    }
+                }
+            }
+        }
+        private readonly object volumeMetersLock = new object();
+        private event EventHandler<InputVolumeMetersEventArgs> inputVolumeMeters;
 
         /// <summary>
         /// The replay buffer has been saved.
@@ -295,6 +403,69 @@ namespace OBSWebsocketDotNet
         /// An unsupported event has been received.
         /// </summary>
         public event EventHandler<UnsupportedEventArgs> UnsupportedEvent;
+
+        #endregion
+
+        #region EventSubscription
+
+        private EventSubscription registeredEvents = EventSubscription.All;
+
+        /// <summary>
+        /// Gets or sets the event subscriptions bitmask. High-volume events are normally
+        /// managed automatically by subscribing/unsubscribing their C# events; set this directly
+        /// only if you need custom control over the subscription mask.
+        /// Changing this while connected sends a ReIdentify to the server.
+        /// </summary>
+        public EventSubscription EventSubscriptions
+        {
+            get => registeredEvents;
+            set
+            {
+                registeredEvents = value;
+                SendReidentify();
+            }
+        }
+
+        private void RegisterEvent(EventSubscription newSubscription)
+        {
+            registeredEvents |= newSubscription;
+            SendReidentify();
+        }
+
+        private void UnRegisterEvent(EventSubscription removeSubscription)
+        {
+            registeredEvents &= ~removeSubscription;
+            SendReidentify();
+        }
+
+        /// <summary>
+        /// Sends a ReIdentify request with the current event subscriptions. No-ops if not connected.
+        /// </summary>
+        /// <returns>true if the ReIdentify request was sent, false if not connected or if the server rejected it</returns>
+        protected bool SendReidentify()
+        {
+            if (wsConnection == null || !wsConnection.IsStarted)
+            {
+                return false;
+            }
+
+            var requestFields = new JObject
+            {
+                { "eventSubscriptions", (uint)registeredEvents }
+            };
+
+            try
+            {
+                SendRequest(MessageTypes.ReIdentify, null, requestFields, false);
+            }
+            catch (ErrorResponseException ex)
+            {
+                Logger?.LogWarning($"ReIdentify failed: {ex.Message}");
+                return false;
+            }
+
+            return true;
+        }
 
         #endregion
 
@@ -404,7 +575,7 @@ namespace OBSWebsocketDotNet
                     break;
 
                 case nameof(SceneItemTransformChanged):
-                    SceneItemTransformChanged?.Invoke(this, new SceneItemTransformEventArgs((string)body["sceneName"], (string)body["sceneItemId"], new SceneItemTransformInfo((JObject)body["sceneItemTransform"])));
+                    sceneItemTransformChanged?.Invoke(this, new SceneItemTransformEventArgs((string)body["sceneName"], (string)body["sceneItemId"], new SceneItemTransformInfo((JObject)body["sceneItemTransform"])));
                     break;
 
                 case nameof(InputAudioSyncOffsetChanged):
@@ -486,11 +657,11 @@ namespace OBSWebsocketDotNet
                     break;
 
                 case nameof(InputActiveStateChanged):
-                    InputActiveStateChanged?.Invoke(this, new InputActiveStateChangedEventArgs((string)body["inputName"], (bool)body["videoActive"]));
+                    inputActiveStateChanged?.Invoke(this, new InputActiveStateChangedEventArgs((string)body["inputName"], (bool)body["videoActive"]));
                     break;
 
                 case nameof(InputShowStateChanged):
-                    InputShowStateChanged?.Invoke(this, new InputShowStateChangedEventArgs((string)body["inputName"], (bool)body["videoShowing"]));
+                    inputShowStateChanged?.Invoke(this, new InputShowStateChangedEventArgs((string)body["inputName"], (bool)body["videoShowing"]));
                     break;
 
                 case nameof(InputAudioBalanceChanged):
@@ -506,7 +677,7 @@ namespace OBSWebsocketDotNet
                     break;
 
                 case nameof(InputVolumeMeters):
-                    InputVolumeMeters?.Invoke(this, new InputVolumeMetersEventArgs(body["inputs"].ToObject<List<InputVolumeMeter>>()));
+                    inputVolumeMeters?.Invoke(this, new InputVolumeMetersEventArgs(body["inputs"].ToObject<List<InputVolumeMeter>>()));
                     break;
 
                 case nameof(ReplayBufferSaved):
