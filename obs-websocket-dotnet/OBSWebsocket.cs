@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -213,6 +214,8 @@ namespace OBSWebsocketDotNet
         /// <param name="requestType">obs-websocket request type, must be one specified in the protocol specification</param>
         /// <param name="additionalFields">additional JSON fields if required by the request type</param>
         /// <returns>The server's JSON response as a JObject</returns>
+        /// <exception cref="RequestTimeoutException">No response was received within <see cref="WSTimeout"/></exception>
+        /// <exception cref="ErrorResponseException">The request was canceled (e.g. by Disconnect), or the server reported an error</exception>
         public JObject SendRequest(string requestType, JObject additionalFields = null)
         {
             return SendRequest(MessageTypes.Request, requestType, additionalFields, true);
@@ -237,7 +240,7 @@ namespace OBSWebsocketDotNet
             // Prepare the asynchronous response handler
             var tcs = new TaskCompletionSource<JObject>();
             JObject message = null;
-            string messageId = null;
+            string messageId;
             do
             {
                 // Generate a random message id
@@ -269,10 +272,15 @@ namespace OBSWebsocketDotNet
         /// <exception cref="ErrorResponseException">The request was canceled (e.g. by Disconnect), or the server reported an error</exception>
         protected JObject WaitForResponse(TaskCompletionSource<JObject> tcs, string messageId, string requestType)
         {
-            // Task.WaitAny (rather than tcs.Task.Wait) blocks for up to wsTimeout without
+            // Task.WaitAny only accepts a timeout of -1ms (infinite) or in [0, int.MaxValue] ms.
+            // Treat anything beyond that range (e.g. TimeSpan.MaxValue used as a "no timeout"
+            // idiom) as infinite instead of letting Task.WaitAny reject it outright.
+            TimeSpan waitTimeout = wsTimeout.TotalMilliseconds > int.MaxValue ? Timeout.InfiniteTimeSpan : wsTimeout;
+
+            // Task.WaitAny (rather than tcs.Task.Wait) blocks for up to waitTimeout without
             // throwing if the task ends up canceled or faulted, so IsCanceled below reflects
             // the outcome of this wait rather than of the eventual Result access.
-            int completedIndex = Task.WaitAny(new Task[] { tcs.Task }, wsTimeout);
+            int completedIndex = Task.WaitAny(new Task[] { tcs.Task }, waitTimeout);
 
             if (completedIndex == -1)
             {

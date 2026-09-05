@@ -100,5 +100,38 @@ namespace OBSWebsocketDotNet.Tests
 
             Assert.AreEqual("Request canceled", ex.Message);
         }
+
+        [TestMethod]
+        public void WaitForResponse_TimeoutSetToMaxValue_DoesNotThrowArgumentOutOfRangeException()
+        {
+            // Task.WaitAny only accepts [0, int.MaxValue] milliseconds or an infinite timeout;
+            // TimeSpan.MaxValue is a plausible "no timeout" idiom that must not blow up.
+            WSTimeout = TimeSpan.MaxValue;
+            var tcs = new TaskCompletionSource<JObject>();
+            tcs.SetResult(new JObject
+            {
+                { "requestStatus", new JObject { { "result", true } } }
+            });
+
+            var result = WaitForResponse(tcs, "msg-7", "GetVersion");
+
+            Assert.IsFalse(result.HasValues);
+        }
+
+        [TestMethod]
+        public void WaitForResponse_TimeoutAtIntMaxMilliseconds_IsPassedThroughUnclamped()
+        {
+            // Exactly at the boundary Task.WaitAny still accepts: must not be treated as "too large".
+            WSTimeout = TimeSpan.FromMilliseconds(int.MaxValue);
+            var tcs = new TaskCompletionSource<JObject>();
+            tcs.SetResult(new JObject
+            {
+                { "requestStatus", new JObject { { "result", true } } }
+            });
+
+            var result = WaitForResponse(tcs, "msg-8", "GetVersion");
+
+            Assert.IsFalse(result.HasValues);
+        }
     }
 }

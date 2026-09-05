@@ -1063,6 +1063,8 @@ namespace OBSWebsocketDotNet
         /// <param name="requestType">obs-websocket request type, must be one specified in the protocol specification</param>
         /// <param name="additionalFields">additional JSON fields if required by the request type</param>
         /// <returns>The server's JSON response as a JObject</returns>
+        /// <exception cref="RequestTimeoutException">No response was received within <see cref="IOBSWebsocket.WSTimeout"/></exception>
+        /// <exception cref="ErrorResponseException">The request was canceled (e.g. by Disconnect), or the server reported an error</exception>
         JObject SendRequest(string requestType, JObject additionalFields = null);
 
         /// <summary>
