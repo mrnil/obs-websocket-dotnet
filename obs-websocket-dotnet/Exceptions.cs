@@ -12,7 +12,7 @@ namespace OBSWebsocketDotNet
     /// <summary>
     /// Thrown when a request receives no response from the server within <see cref="OBSWebsocket.WSTimeout"/>
     /// </summary>
-    public class RequestTimeoutException : Exception
+    public class RequestTimeoutException : TimeoutException
     {
         /// <summary>
         /// Constructor

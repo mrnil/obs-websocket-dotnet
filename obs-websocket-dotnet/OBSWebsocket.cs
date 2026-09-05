@@ -24,7 +24,7 @@ namespace OBSWebsocketDotNet
         private WebsocketClient wsConnection;
 
         private delegate void RequestCallback(OBSWebsocket sender, JObject body);
-        protected readonly ConcurrentDictionary<string, TaskCompletionSource<JObject>> responseHandlers;
+        internal readonly ConcurrentDictionary<string, TaskCompletionSource<JObject>> responseHandlers;
 
         // Random should never be created inside a function
         private static readonly Random random = new Random();
@@ -270,7 +270,7 @@ namespace OBSWebsocketDotNet
         /// <returns>The server's JSON response data as a JObject</returns>
         /// <exception cref="RequestTimeoutException">No response was received within <see cref="WSTimeout"/></exception>
         /// <exception cref="ErrorResponseException">The request was canceled (e.g. by Disconnect), or the server reported an error</exception>
-        protected JObject WaitForResponse(TaskCompletionSource<JObject> tcs, string messageId, string requestType)
+        internal JObject WaitForResponse(TaskCompletionSource<JObject> tcs, string messageId, string requestType)
         {
             // Task.WaitAny only accepts a timeout of -1ms (infinite) or in [0, int.MaxValue] ms.
             // Treat anything beyond that range (e.g. TimeSpan.MaxValue used as a "no timeout"
